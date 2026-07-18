@@ -45,6 +45,7 @@ class Config:
     username: str | None
     password: str | None
     allow_internal: bool
+    internal_token_file: str
 
     @property
     def has_official(self) -> bool:
@@ -52,7 +53,15 @@ class Config:
 
     @property
     def has_internal(self) -> bool:
-        return bool(self.allow_internal and self.username and self.password)
+        """Internal path is available when a bootstrapped bearer-token file exists.
+
+        The internal `metrics-service` authenticates with a web-app bearer token
+        (the password sign-in is Cloudflare-blocked). The presence of the token
+        file — produced by `whoop-hr-bootstrap` — is the explicit opt-in.
+        """
+        from pathlib import Path
+
+        return Path(self.internal_token_file).exists()
 
     @classmethod
     def load(cls, dotenv: str | Path = ".env") -> "Config":
@@ -66,6 +75,9 @@ class Config:
             username=os.environ.get("WHOOP_USERNAME") or None,
             password=os.environ.get("WHOOP_PASSWORD") or None,
             allow_internal=_bool(os.environ.get("WHOOP_ALLOW_INTERNAL"), default=False),
+            internal_token_file=os.environ.get(
+                "WHOOP_INTERNAL_TOKEN_FILE", ".whoop_internal_token.json"
+            ),
         )
 
 

@@ -16,6 +16,7 @@ dev = [
 
 [project.scripts]
 whoop-hr-auth = "whoop_hr.cli:auth_main"
+whoop-hr-bootstrap = "whoop_hr.cli:bootstrap_main"
 whoop-hr-validate = "whoop_hr.cli:validate_main"
 whoop-hr-mcp = "whoop_hr.server:main"
 

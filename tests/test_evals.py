@@ -89,9 +89,12 @@ def test_parse_official_stream_shape():
 
 
 def test_parse_internal_metrics_shape():
-    raw = {"heart_rate": [
-        {"timestamp": "2026-01-01T02:00:00Z", "value": 61},
-        {"timestamp": "2026-01-01T02:00:06Z", "value": 62},
+    # Validated live shape: values:[{data:<bpm>, time:<epoch_ms>}]
+    raw = {"name": "heart_rate", "start": "2026-01-01T02:00:00Z", "values": [
+        {"data": 61, "time": 1767232800000},
+        {"data": 62, "time": 1767232806000},
     ]}
     s = _hrseries_from_metrics(raw, "2026-01-01T02:00:00Z", "2026-01-01T02:01:00Z", "sid")
     assert s.count == 2 and s.source is HRSource.INTERNAL_BFF
+    assert s.average_bpm() == 61.5
+    assert s.median_gap_seconds() == 6.0

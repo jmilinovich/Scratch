@@ -226,11 +226,11 @@ def validate_main(argv: list[str] | None = None) -> int:
         return 0
 
     # -- Phase 3: internal fallback ------------------------------------------
-    print("\n== Phase 3: internal BFF fallback ==")
+    print("\n== Phase 3: internal BFF (bearer-token) ==")
     if not cfg.has_internal:
-        print("   internal path disabled. To test it, set WHOOP_ALLOW_INTERNAL=true "
-              "plus WHOOP_USERNAME/PASSWORD in .env, then re-run.")
-        print("\n⚠️  VERDICT: Path #2 did not deliver and Path #3 is disabled. "
+        print(f"   no internal token file ({cfg.internal_token_file}). "
+              "Run `whoop-hr-bootstrap` to create it, then re-run.")
+        print("\n⚠️  VERDICT: Path #2 did not deliver and Path #3 not bootstrapped. "
               "No intraday HR available under current config.")
         return 1
     try:
@@ -254,6 +254,71 @@ def validate_main(argv: list[str] | None = None) -> int:
 
     print("\n⚠️  VERDICT: neither path delivered usable intraday HR under current config.")
     return 1
+
+
+# ---------------------------------------------------------------------------
+# bootstrap — install the internal bearer-token bundle exported from a browser
+# ---------------------------------------------------------------------------
+
+BOOTSTRAP_SNIPPET = """\
+// Run in the DevTools console while logged in at app.whoop.com, then move the
+// downloaded whoop_bootstrap.json into place (this command does that for you):
+(() => {
+  const ck = n => (document.cookie.match(new RegExp(n+'=([^;]+)'))||[])[1];
+  const b = {
+    access_token: decodeURIComponent(ck('whoop-auth-token')||''),
+    refresh_token: decodeURIComponent(ck('whoop-auth-refresh-token')||''),
+    expiry: decodeURIComponent(ck('whoop-auth-expiry')||''),
+    user_id: Number(location.pathname.split('/')[2]),
+  };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(b)], {type:'application/json'}));
+  a.download = 'whoop_bootstrap.json'; a.click();
+})();
+"""
+
+
+def bootstrap_main(argv: list[str] | None = None) -> int:
+    import json
+    import os
+    from pathlib import Path
+
+    ap = argparse.ArgumentParser(
+        description="Install the internal bearer-token bundle exported from a browser."
+    )
+    ap.add_argument(
+        "bundle",
+        nargs="?",
+        default=os.path.expanduser("~/Downloads/whoop_bootstrap.json"),
+        help="path to the exported whoop_bootstrap.json (default: ~/Downloads/...)",
+    )
+    ap.add_argument("--snippet", action="store_true", help="print the browser snippet and exit")
+    args = ap.parse_args(argv)
+
+    if args.snippet:
+        print(BOOTSTRAP_SNIPPET)
+        return 0
+
+    cfg = Config.load()
+    src = Path(args.bundle)
+    if not src.exists():
+        print(f"No bundle at {src}.\n\nTo produce one, log in at app.whoop.com, open the")
+        print("DevTools console, and run `whoop-hr-bootstrap --snippet` for the snippet.")
+        return 1
+    try:
+        bundle = json.loads(src.read_text())
+    except json.JSONDecodeError as e:
+        print(f"bundle is not valid JSON: {e}")
+        return 1
+    missing = [k for k in ("access_token", "refresh_token", "user_id") if not bundle.get(k)]
+    if missing:
+        print(f"bundle missing fields: {missing}")
+        return 1
+    dest = Path(cfg.internal_token_file)
+    dest.write_text(json.dumps(bundle))
+    dest.chmod(0o600)
+    print(f"✅ installed internal token bundle -> {dest} (expiry: {bundle.get('expiry')})")
+    return 0
 
 
 if __name__ == "__main__":

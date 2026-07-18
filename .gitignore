@@ -4,6 +4,8 @@
 *.token.json
 .whoop_token.json
 whoop_token*.json
+*token*.json
+.whoop_internal_token.json
 
 # Python
 __pycache__/

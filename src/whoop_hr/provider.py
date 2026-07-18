@@ -13,7 +13,7 @@ from datetime import datetime, time, timedelta, timezone
 
 from .config import Config
 from .evals import stream_is_usable
-from .internal import InternalClient
+from .internal import InternalClient, TokenExpiredError
 from .models import HRSeries, Recovery, SleepSummary
 from .official import OfficialAPIError, OfficialClient, _hrseries_from_stream
 
@@ -128,15 +128,20 @@ class WhoopHR:
         except OfficialAPIError as e:
             stream_note = f"official stream error (HTTP {e.status})"
 
-        # PATH #3 fallback — only if enabled.
+        # PATH #3 fallback — the internal bearer-token client.
         if self.internal is None:
             return HRResult(
                 None,
                 False,
-                f"{stream_note}; internal fallback disabled "
-                f"(set WHOOP_ALLOW_INTERNAL=true + credentials to enable)",
+                f"{stream_note}; internal path unavailable "
+                f"(run `whoop-hr-bootstrap` to create the token file)",
             )
-        series = self.internal.get_heart_rate(s_start, s_end, step=6, sleep_id=sleep_id)
+        try:
+            series = self.internal.get_heart_rate(
+                s_start, s_end, step=6, sleep_id=sleep_id
+            )
+        except TokenExpiredError as e:
+            return HRResult(None, True, f"{stream_note}; internal token expired: {e}")
         return HRResult(series, True, f"{stream_note}; used internal BFF 6s HR")
 
 

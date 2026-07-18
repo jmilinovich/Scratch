@@ -111,11 +111,13 @@ def eval_cross_check(
         checks.append(f"vs cycle avg {cycle_avg_hr:.0f}: Δ{delta:.0f}")
         ok = ok and delta <= 15
     if recovery and recovery.resting_heart_rate:
-        # Overnight min should be near (>=) resting HR, not far below it.
+        # WHOOP's reported RHR runs a few bpm above the true overnight minimum,
+        # so the nadir sitting somewhat below RHR is expected; only flag an
+        # implausibly deep gap (bad/mismatched data).
         lo = series.min_bpm() or avg
         delta = lo - recovery.resting_heart_rate
         checks.append(f"nadir {lo:.0f} vs RHR {recovery.resting_heart_rate:.0f}: Δ{delta:+.0f}")
-        ok = ok and delta >= -12
+        ok = ok and delta >= -25
     if not checks:
         return EvalReport("cross_check", True, "no official reference available (skipped)")
     return EvalReport("cross_check", ok, "; ".join(checks))
