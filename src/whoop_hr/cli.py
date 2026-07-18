@@ -60,18 +60,50 @@ def _capture_code(redirect_uri: str, timeout: int = 300) -> str | None:
 
 
 def auth_main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="WHOOP official OAuth handshake.")
+    ap.add_argument("--url", action="store_true", help="print the authorize URL and exit")
+    ap.add_argument(
+        "--code",
+        help="authorization code (or the full redirect URL) captured in the browser; "
+        "exchanges it for a token non-interactively",
+    )
+    ap.add_argument("--no-server", action="store_true", help="skip the loopback capture")
+    args = ap.parse_args(argv)
+
     cfg = Config.load()
     if not cfg.has_official:
         print("ERROR: set WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET in .env")
         return 2
     client = OfficialClient(cfg)
+
+    # Non-interactive exchange: caller already has the code from the browser.
+    if args.code:
+        code = args.code.strip()
+        if "code=" in code:
+            code = urllib.parse.parse_qs(urllib.parse.urlparse(code).query).get("code", [""])[0]
+        try:
+            client.exchange_code(code)
+        except OfficialAPIError as e:
+            print(f"Token exchange failed: {e}")
+            return 1
+        try:
+            prof = client.profile()
+            who = prof.get("email") or prof.get("first_name") or "ok"
+            print(f"✅ Authenticated ({who}). Token saved to {cfg.token_file}")
+        except OfficialAPIError as e:
+            print(f"Token saved, but profile fetch failed: {e}")
+        return 0
+
     state = secrets.token_urlsafe(16)
     url = client.authorization_url(state)
+    if args.url:
+        print(url)
+        return 0
     print("\n1. Open this URL in a browser and approve access:\n")
     print(f"   {url}\n")
     print(f"2. Waiting for redirect to {cfg.redirect_uri} ...")
 
-    code = _capture_code(cfg.redirect_uri)
+    code = None if args.no_server else _capture_code(cfg.redirect_uri)
     if not code:
         print("\n   Did not auto-capture. Paste the full redirect URL (or just the code):")
         raw = input("   > ").strip()
