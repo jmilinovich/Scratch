@@ -207,21 +207,35 @@ class OfficialClient:
     ) -> dict:
         """PATH #2 — the key test. Undocumented per-timestamp stream.
 
-        Returns the raw JSON. Raises OfficialAPIError on non-2xx so the caller
-        (validate.py) can record the exact failure mode (403 partner-gated,
-        404 not-available, etc.).
+        VALIDATED 2026-07-18 on a standard developer app:
+          - Bare endpoint (no `types`) → 200 with a full 60s-cadence skeleton
+            spanning the whole sleep, but every value field is `null`.
+          - `types=hr` → 403 Forbidden; `types=heart_rate` / multi → 400. The
+            `types` parameter is recognized and validated, but its valid values
+            are partner/enterprise-gated — a standard app cannot populate values.
+        So this path yields the stream's *shape* but not the data. Default is
+        therefore to omit `types` (the only form that 200s); pass `types` only
+        if your app has partner access. Raises OfficialAPIError on non-2xx.
         """
-        types = types or ["hr"]
-        params = {"types": ",".join(types)}
+        params = {"types": ",".join(types)} if types else None
         resp = self._get(f"{API_PREFIX}/activity/sleep/{sleep_id}/stream", params)
         if resp.status_code >= 400:
             raise OfficialAPIError(resp.status_code, "sleep_stream", resp.text)
         return resp.json()
 
     def sleep_hr_stream(self, sleep_id: str) -> HRSeries:
-        """Parse the sleep stream into an HRSeries (hr samples only)."""
-        raw = self.get_sleep_stream(sleep_id, types=["hr"])
+        """Parse the accessible (no-`types`) sleep stream into an HRSeries.
+
+        On a standard app the values are null, so this yields 0 samples and the
+        selector falls back; on a partner app it yields real hr samples.
+        """
+        raw = self.get_sleep_stream(sleep_id)
         return _hrseries_from_stream(raw, sleep_id)
+
+    @staticmethod
+    def stream_len(raw: dict) -> int:
+        """Number of raw timestamp entries in a stream payload (populated or not)."""
+        return len(raw.get("stream") or raw.get("data") or raw.get("samples") or [])
 
 
 # -- parsing helpers ---------------------------------------------------------

@@ -5,25 +5,34 @@ Claude instance can query it. Built to prefer the **official, consented API**
 and only fall back to the reverse-engineered web-app API if the official path
 provably can't deliver intraday HR.
 
-> **Status:** the code (all three access paths, the runtime selector, the MCP
-> server, and the validation/eval harness) is complete and unit-tested. The
-> live decision — *does the official sleep stream actually return usable
-> per-sample HR?* — requires **your** WHOOP developer app + account and is run
-> with one command (`whoop-hr-validate`). It has not been run here because this
-> build environment has no WHOOP credentials.
+## Finding (validated 2026-07-18, standard developer app)
+
+**Path #2 is disproven — the official sleep stream will not give a standard app
+the values.** Probed directly against a real account:
+
+- `GET /developer/v2/activity/sleep/{id}/stream` (no `types`) → **200**, a full
+  **433-entry, 60-second-cadence** skeleton spanning the entire 7.2h sleep —
+  but **every value field is `null`** (hr, skin_temp, is_sleeping, … 0/433).
+- Adding `?types=hr` → **403 Forbidden**; `types=heart_rate` / multi-value →
+  **400**. So `types` is a *recognized, validated* parameter whose valid values
+  are **partner/enterprise-gated**. No param spelling (`type`, `metrics`,
+  `fields`, `include`) populates values on a standard app.
+
+Conclusion: WHOOP exposes the stream's *shape* but withholds the samples, and
+even the grid is 1-minute — never the 6-second data. **Real per-sample overnight
+HR requires Path #3** (the internal API), exactly as the fallback anticipated.
 
 ## The three access paths
 
 | # | Path | Auth | Intraday HR? | Cost |
 |---|------|------|--------------|------|
 | 1 | Official developer API (`/developer/v2/...`) | OAuth2 auth-code | summary only | none — consented, stable |
-| 2 | **Undocumented sleep stream** (`/developer/v2/activity/sleep/{id}/stream`) | same OAuth2 | **maybe — the key test** | none if it works |
-| 3 | Internal "BFF" web-app API (`/metrics-service/v1/...`) | account password | yes, true 6s HR | ⚠️ against ToS, fragile |
+| 2 | Undocumented sleep stream (`/developer/v2/activity/sleep/{id}/stream`) | same OAuth2 | ❌ **null-stubbed for standard apps** (values partner-gated) | none, but no data |
+| 3 | Internal "BFF" web-app API (`/metrics-service/v1/...`) | account password | ✅ true 6s HR | ⚠️ against ToS, fragile |
 
-The whole strategy hinges on **path #2**. If `get_sleep_stream(sleep_id,
-["hr"])` returns real per-sample overnight HR on a normal developer app, the
-problem is solved on the safe path and the scraper is unnecessary. If it
-404s / 403s / returns zero-stubbed data, we fall back to path #3.
+The strategy hinged on **path #2**; the validation above settled it. The client
+still tries path #2 first at runtime (a partner app *would* get real samples),
+detects the null stub, and falls back to path #3 when it's enabled.
 
 `get_recovery` and `get_sleep_summary` **always** use the official API (path #1)
 — they're consented and always useful regardless of how the HR question

@@ -15,7 +15,7 @@ from .config import Config
 from .evals import stream_is_usable
 from .internal import InternalClient
 from .models import HRSeries, Recovery, SleepSummary
-from .official import OfficialAPIError, OfficialClient
+from .official import OfficialAPIError, OfficialClient, _hrseries_from_stream
 
 
 @dataclass
@@ -109,13 +109,22 @@ class WhoopHR:
 
         # PATH #2 first — the consented, stable option.
         try:
-            series = self.official.sleep_hr_stream(sleep_id)
+            raw = self.official.get_sleep_stream(sleep_id)  # no types: the only 200 form
+            series = _hrseries_from_stream(raw, sleep_id)
             series.window_start = series.window_start or _parse(s_start)
             series.window_end = series.window_end or _parse(s_end)
             ok, why = stream_is_usable(series)
             if ok:
                 return HRResult(series, False, f"official sleep stream: {why}")
-            stream_note = f"official stream unusable ({why})"
+            raw_n = self.official.stream_len(raw)
+            if raw_n and series.count == 0:
+                # The documented-but-gated case: shape present, values withheld.
+                stream_note = (
+                    f"official stream returned {raw_n} timestamps but all values "
+                    f"are null (intraday values are partner-gated; types=hr → 403)"
+                )
+            else:
+                stream_note = f"official stream unusable ({why})"
         except OfficialAPIError as e:
             stream_note = f"official stream error (HTTP {e.status})"
 

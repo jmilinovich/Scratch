@@ -197,9 +197,13 @@ def validate_main(argv: list[str] | None = None) -> int:
     print("\n== Phase 2: official sleep stream (get_sleep_stream) ==")
     stream_wins = False
     try:
-        raw = client.get_sleep_stream(sleep_id, types=["hr"])
+        raw = client.get_sleep_stream(sleep_id)  # no types: the only 200 form
         entries = raw.get("stream") or raw.get("data") or raw.get("samples") or []
         print(f"   HTTP 200; top-level keys={list(raw.keys())}; {len(entries)} raw entries")
+        # Diagnose the partner-gated stub: shape present but values withheld.
+        if entries and all(e.get("hr") is None for e in entries):
+            print(f"   ⚠️  all {len(entries)} entries have hr=null — values are "
+                  f"partner-gated (types=hr → 403). Stream shape only, no data.")
         series = client.sleep_hr_stream(sleep_id)
         if target.get("start"):
             series.window_start = datetime.fromisoformat(target["start"].replace("Z", "+00:00"))
