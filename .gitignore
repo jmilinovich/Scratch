@@ -1,0 +1,22 @@
+# Secrets & tokens — NEVER commit
+.env
+.env.local
+*.token.json
+.whoop_token.json
+whoop_token*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.uv/
+
+# Data pulls (may contain personal biometric data)
+data/
+*.csv
+!tests/**/*.csv
