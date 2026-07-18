@@ -28,11 +28,19 @@ HR requires Path #3** (the internal API), exactly as the fallback anticipated.
 |---|------|------|--------------|------|
 | 1 | Official developer API (`/developer/v2/...`) | OAuth2 auth-code | summary only | none — consented, stable |
 | 2 | Undocumented sleep stream (`/developer/v2/activity/sleep/{id}/stream`) | same OAuth2 | ❌ **null-stubbed for standard apps** (values partner-gated) | none, but no data |
-| 3 | Internal "BFF" web-app API (`/metrics-service/v1/...`) | account password | ✅ true 6s HR | ⚠️ against ToS, fragile |
+| 3 | Internal "BFF" web-app API (`/metrics-service/v1/...`) | **browser bearer token** | ✅ **true 6s HR (validated)** | ⚠️ against ToS, fragile |
 
 The strategy hinged on **path #2**; the validation above settled it. The client
 still tries path #2 first at runtime (a partner app *would* get real samples),
-detects the null stub, and falls back to path #3 when it's enabled.
+detects the null stub, and falls back to path #3 when it's bootstrapped.
+
+**Path #3 validated 2026-07-18:** the account-password `sign-in` endpoint is
+gateway/Cloudflare-blocked to non-browser clients (HTTP 401). The web app
+actually authenticates the `metrics-service` with a **bearer token** it keeps in
+the readable `whoop-auth-token` cookie. Authenticating Python with that token
+(`GET /metrics-service/v1/metrics/user/{id}?...&step=6`, response shape
+`{values:[{data:<bpm>, time:<epoch_ms>}]}`) returns real 6-second overnight HR —
+one night pulled clean at **4323 samples @ 6.0s** across the exact sleep window.
 
 `get_recovery` and `get_sleep_summary` **always** use the official API (path #1)
 — they're consented and always useful regardless of how the HR question
@@ -76,20 +84,26 @@ declaring a winner. It never declares success on a bare HTTP 200.
 5. **Reproducibility** — same night pulled twice is identical.
 6. **Token lifecycle** — a pull >1h after auth confirms refresh fires (token auto-refreshes 60s before expiry; run `whoop-hr-validate` again the next day to exercise it).
 
-### Enabling the fallback (path #3) — only if Phase 2 fails
+### Enabling path #3 — bootstrap the internal token
 
-The internal API uses your real WHOOP **password**, is undocumented, can break
-without notice, and **violates WHOOP's ToS**. It stays off unless you opt in:
+The internal API is undocumented, can break without notice, and **violates
+WHOOP's ToS** — use it only for pulling *your own* data. It authenticates with a
+bearer token lifted from a logged-in web session (not your password):
 
-```bash
-# in .env
-WHOOP_ALLOW_INTERNAL=true
-WHOOP_USERNAME=you@example.com
-WHOOP_PASSWORD=...
-```
+1. Log in at <https://app.whoop.com> in Chrome.
+2. Get the console snippet and run it in DevTools (downloads `whoop_bootstrap.json`):
+   ```bash
+   whoop-hr-bootstrap --snippet
+   ```
+3. Install the downloaded bundle into the gitignored token file:
+   ```bash
+   whoop-hr-bootstrap          # reads ~/Downloads/whoop_bootstrap.json
+   ```
 
-It's isolated in `src/whoop_hr/internal.py` behind an `Endpoints` table, so a
-WHOOP change is a one-line fix and the whole module is rip-and-replaceable.
+Now `whoop-hr-validate` (and the MCP server) will use path #3. The token is
+valid ~24h — see **Keeping the token fresh** below. The whole path is isolated
+in `src/whoop_hr/internal.py` behind an `Endpoints` table, so a WHOOP change is
+a one-line fix and the module is rip-and-replaceable.
 
 ## MCP server
 
@@ -117,14 +131,16 @@ Register with Claude Desktop / Claude Code (`claude_desktop_config.json`):
       "env": {
         "WHOOP_CLIENT_ID": "…",
         "WHOOP_CLIENT_SECRET": "…",
-        "WHOOP_TOKEN_FILE": "/absolute/path/.whoop_token.json"
+        "WHOOP_TOKEN_FILE": "/absolute/path/.whoop_token.json",
+        "WHOOP_INTERNAL_TOKEN_FILE": "/absolute/path/.whoop_internal_token.json"
       }
     }
   }
 }
 ```
 
-(Run `whoop-hr-auth` once first so the token file exists.)
+(Run `whoop-hr-auth` once for the official token, and `whoop-hr-bootstrap` once
+for the internal token, so both files exist.)
 
 ## Architecture
 
@@ -132,11 +148,11 @@ Register with Claude Desktop / Claude Code (`claude_desktop_config.json`):
 config.py     env/.env loading, no dep for parsing
 models.py     HRSample/HRSeries/Recovery/SleepSummary + coverage/cadence math (stdlib only)
 official.py   path #1/#2: OAuth2 + auto-refresh + collections + get_sleep_stream
-internal.py   path #3: BFF sign-in + metrics-service 6s HR (isolated, ToS-flagged)
+internal.py   path #3: bearer-token metrics-service 6s HR (isolated, ToS-flagged)
 evals.py      the six data-quality checks + the selector's usability gate
 provider.py   WhoopHR: unified interface + runtime selector (prefer stream, fall back)
 server.py     FastMCP server (3 tools)
-cli.py        whoop-hr-auth, whoop-hr-validate
+cli.py        whoop-hr-auth, whoop-hr-bootstrap, whoop-hr-validate
 ```
 
 ~150 lines of glue own the selection logic; the endpoint knowledge mirrors the
